@@ -6,11 +6,7 @@
 <title>Push Room</title>
 
 <style>
-*{
-  margin:0;
-  padding:0;
-  box-sizing:border-box;
-}
+*{margin:0;padding:0;box-sizing:border-box;}
 
 body{
   font-family:Arial, Helvetica, sans-serif;
@@ -24,7 +20,7 @@ body{
 
 .wrap{
   width:100%;
-  max-width:420px;
+  max-width:460px;
   padding:30px;
   text-align:center;
 }
@@ -65,11 +61,7 @@ button{
   border-radius:12px;
   background:#22c55e;
   color:white;
-  margin-bottom:20px;
-}
-
-#connectBtn:hover{
-  transform:scale(1.02);
+  margin-bottom:18px;
 }
 
 #pushBtn{
@@ -80,38 +72,51 @@ button{
   font-weight:bold;
   background:#3b82f6;
   color:white;
-  margin-top:10px;
+  margin-top:12px;
   display:none;
 }
 
-#pushBtn:hover{
-  transform:scale(1.04);
-}
-
-#pushBtn:active{
-  transform:scale(.96);
-}
-
 .status{
-  margin-top:16px;
-  opacity:.8;
-}
-
-.flash{
-  animation:flash .5s ease;
-}
-
-@keyframes flash{
-  0%{transform:scale(1);}
-  50%{transform:scale(1.12);}
-  100%{transform:scale(1);}
+  margin-top:14px;
+  opacity:.85;
 }
 
 #notif{
-  margin-top:18px;
+  margin-top:16px;
   font-size:24px;
   color:#facc15;
   min-height:30px;
+}
+
+.panel{
+  margin-top:22px;
+  text-align:left;
+  background:#0f172a;
+  padding:16px;
+  border-radius:14px;
+}
+
+.panel h3{
+  font-size:18px;
+  margin-bottom:10px;
+}
+
+.machine{
+  padding:8px 10px;
+  background:#334155;
+  border-radius:10px;
+  margin-bottom:8px;
+  font-size:14px;
+}
+
+.online{
+  color:#22c55e;
+  font-weight:bold;
+}
+
+.offline{
+  color:#ef4444;
+  font-weight:bold;
 }
 </style>
 </head>
@@ -121,6 +126,7 @@ button{
   <h1>⚡ Push Room</h1>
 
   <div class="card">
+
     <input id="roomInput" placeholder="CODE ROOM" maxlength="12"/>
     <button id="connectBtn">Connexion</button>
 
@@ -128,19 +134,21 @@ button{
 
     <div class="status" id="status">Non connecté</div>
     <div id="notif"></div>
+
+    <div class="panel">
+      <h3>🖥 Machines connectées</h3>
+      <div id="machinesList">Aucune</div>
+    </div>
+
   </div>
 </div>
 
 <script type="module">
 
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-/* ===========================
-   REMPLACE ICI
-=========================== */
 const SUPABASE_URL = "https://ixbefzpxsmsvlqicwbda.supabase.co"
-const SUPABASE_KEY = "sb_publishable_S0lBKp8KJQIzcdXJCdXz5A_bvv-Q9V2"
-/* =========================== */
+const SUPABASE_KEY = "TA_CLE_ICI"
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
@@ -149,71 +157,92 @@ const connectBtn = document.getElementById("connectBtn")
 const pushBtn = document.getElementById("pushBtn")
 const statusTxt = document.getElementById("status")
 const notif = document.getElementById("notif")
+const machinesList = document.getElementById("machinesList")
 
-let currentRoom = null
-let channel = null
 let myId = Math.random().toString(36).slice(2,8)
+let currentRoom = null
+let presenceChannel = null
+let pushChannel = null
+
+function renderMachines(state){
+
+  const users = []
+
+  for(const key in state){
+    const arr = state[key]
+    arr.forEach(u => users.push(u))
+  }
+
+  if(users.length === 0){
+    machinesList.innerHTML = "Aucune"
+    return
+  }
+
+  machinesList.innerHTML = users.map(u => `
+    <div class="machine">
+      ${u.id} - <span class="online">en ligne</span>
+    </div>
+  `).join("")
+}
 
 connectBtn.onclick = async () => {
 
-  const code = roomInput.value.trim().toUpperCase()
-  if(!code) return
-
-  currentRoom = code
-
-  // crée room si absente
-  await supabase.from("rooms").upsert({
-    code: currentRoom,
-    last_push_at: new Date().toISOString(),
-    sender: "system"
-  }, { onConflict: "code" })
+  currentRoom = roomInput.value.trim().toUpperCase()
+  if(!currentRoom) return
 
   statusTxt.innerText = "🟢 Connecté à " + currentRoom
   pushBtn.style.display = "inline-block"
 
-  if(channel) supabase.removeChannel(channel)
+  if(presenceChannel) await supabase.removeChannel(presenceChannel)
+  if(pushChannel) await supabase.removeChannel(pushChannel)
 
-  channel = supabase
-    .channel("room-"+currentRoom)
-    .on(
-      'postgres_changes',
-      {
-        event:'UPDATE',
-        schema:'public',
-        table:'rooms',
-        filter:`code=eq.${currentRoom}`
-      },
-      payload => {
+  // PRESENCE CHANNEL
+  presenceChannel = supabase.channel("presence-"+currentRoom, {
+    config:{ presence:{ key: myId } }
+  })
 
-        const data = payload.new
-
-        if(data.sender !== myId){
-          notif.innerText = "⚡ Push reçu !"
-          pushBtn.classList.add("flash")
-
-          setTimeout(()=>{
-            notif.innerText = ""
-            pushBtn.classList.remove("flash")
-          },1000)
-        }
-
+  presenceChannel
+    .on("presence", { event:"sync" }, () => {
+      const state = presenceChannel.presenceState()
+      renderMachines(state)
+    })
+    .subscribe(async (status) => {
+      if(status === "SUBSCRIBED"){
+        await presenceChannel.track({
+          id: myId,
+          joined_at: new Date().toISOString()
+        })
       }
-    )
+    })
+
+  // PUSH CHANNEL
+  pushChannel = supabase.channel("push-"+currentRoom)
+
+  pushChannel
+    .on("broadcast", { event:"push" }, ({ payload }) => {
+
+      if(payload.sender !== myId){
+        notif.innerText = "⚡ Push reçu !"
+
+        setTimeout(()=>{
+          notif.innerText = ""
+        },1000)
+      }
+
+    })
     .subscribe()
 
 }
 
 pushBtn.onclick = async () => {
 
-  if(!currentRoom) return
+  if(!pushChannel) return
 
-  await supabase
-    .from("rooms")
-    .update({
-      last_push_at:new Date().toISOString(),
-      sender:myId
-    })
-    .eq("code", currentRoom)
+  await pushChannel.send({
+    type:"broadcast",
+    event:"push",
+    payload:{ sender: myId }
+  })
 
 }
 
