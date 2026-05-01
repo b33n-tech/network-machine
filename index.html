@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Push Room</title>
+
+<style>
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+
+body{
+  font-family:Arial, Helvetica, sans-serif;
+  background:#0f172a;
+  color:white;
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+}
+
+.wrap{
+  width:100%;
+  max-width:420px;
+  padding:30px;
+  text-align:center;
+}
+
+h1{
+  font-size:38px;
+  margin-bottom:20px;
+}
+
+.card{
+  background:#1e293b;
+  border-radius:20px;
+  padding:25px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+
+input{
+  width:100%;
+  padding:16px;
+  border:none;
+  border-radius:12px;
+  font-size:20px;
+  text-align:center;
+  margin-bottom:15px;
+  text-transform:uppercase;
+}
+
+button{
+  border:none;
+  cursor:pointer;
+  transition:.2s;
+}
+
+#connectBtn{
+  width:100%;
+  padding:14px;
+  font-size:18px;
+  border-radius:12px;
+  background:#22c55e;
+  color:white;
+  margin-bottom:20px;
+}
+
+#connectBtn:hover{
+  transform:scale(1.02);
+}
+
+#pushBtn{
+  width:220px;
+  height:220px;
+  border-radius:50%;
+  font-size:42px;
+  font-weight:bold;
+  background:#3b82f6;
+  color:white;
+  margin-top:10px;
+  display:none;
+}
+
+#pushBtn:hover{
+  transform:scale(1.04);
+}
+
+#pushBtn:active{
+  transform:scale(.96);
+}
+
+.status{
+  margin-top:16px;
+  opacity:.8;
+}
+
+.flash{
+  animation:flash .5s ease;
+}
+
+@keyframes flash{
+  0%{transform:scale(1);}
+  50%{transform:scale(1.12);}
+  100%{transform:scale(1);}
+}
+
+#notif{
+  margin-top:18px;
+  font-size:24px;
+  color:#facc15;
+  min-height:30px;
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>⚡ Push Room</h1>
+
+  <div class="card">
+    <input id="roomInput" placeholder="CODE ROOM" maxlength="12"/>
+    <button id="connectBtn">Connexion</button>
+
+    <button id="pushBtn">PUSH</button>
+
+    <div class="status" id="status">Non connecté</div>
+    <div id="notif"></div>
+  </div>
+</div>
+
+<script type="module">
+
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+
+/* ===========================
+   REMPLACE ICI
+=========================== */
+const SUPABASE_URL = "https://ixbefzpxsmsvlqicwbda.supabase.co"
+const SUPABASE_KEY = "sb_publishable_S0lBKp8KJQIzcdXJCdXz5A_bvv-Q9V2"
+/* =========================== */
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+const roomInput = document.getElementById("roomInput")
+const connectBtn = document.getElementById("connectBtn")
+const pushBtn = document.getElementById("pushBtn")
+const statusTxt = document.getElementById("status")
+const notif = document.getElementById("notif")
+
+let currentRoom = null
+let channel = null
+let myId = Math.random().toString(36).slice(2,8)
+
+connectBtn.onclick = async () => {
+
+  const code = roomInput.value.trim().toUpperCase()
+  if(!code) return
+
+  currentRoom = code
+
+  // crée room si absente
+  await supabase.from("rooms").upsert({
+    code: currentRoom,
+    last_push_at: new Date().toISOString(),
+    sender: "system"
+  }, { onConflict: "code" })
+
+  statusTxt.innerText = "🟢 Connecté à " + currentRoom
+  pushBtn.style.display = "inline-block"
+
+  if(channel) supabase.removeChannel(channel)
+
+  channel = supabase
+    .channel("room-"+currentRoom)
+    .on(
+      'postgres_changes',
+      {
+        event:'UPDATE',
+        schema:'public',
+        table:'rooms',
+        filter:`code=eq.${currentRoom}`
+      },
+      payload => {
+
+        const data = payload.new
+
+        if(data.sender !== myId){
+          notif.innerText = "⚡ Push reçu !"
+          pushBtn.classList.add("flash")
+
+          setTimeout(()=>{
+            notif.innerText = ""
+            pushBtn.classList.remove("flash")
+          },1000)
+        }
+
+      }
+    )
+    .subscribe()
+
+}
+
+pushBtn.onclick = async () => {
+
+  if(!currentRoom) return
+
+  await supabase
+    .from("rooms")
+    .update({
+      last_push_at:new Date().toISOString(),
+      sender:myId
+    })
+    .eq("code", currentRoom)
+
+}
+
+</script>
+</body>
+</html>
